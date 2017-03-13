@@ -9,6 +9,27 @@ MultiRNNCell = rnn.MultiRNNCell
 dynamic_rnn_decoder = seq2seq.dynamic_rnn_decoder
 simple_decoder_fn_train = seq2seq.simple_decoder_fn_train
 
+# def decoder_rnn(cell, input, seq_length, hidden_dim, num_classes, 
+#                 initializer, with_softmax):
+  
+#   rnn_output, rnn_state = rnn.rnn(cell, rnn_input,
+#                                   initial_state=initial_state,
+#                                   sequence_length=self.seq_lengths)
+
+#   with tf.variable_scope("decoder_rnn") as scope:
+#     W = tf.get_variable(
+#         "W", [hidden_dim, num_classes],initializer=initializer)
+#     b = tf.get_variable(
+#         "b", [num_classes],initializer=initializer)
+#     scores = tf.nn.xw_plus_b(rnn_state[-1][0], W, b)
+#     if with_softmax:
+#       return tf.nn.softmax(scores)
+#     else:
+#       return scores, '', ''
+
+
+
+
 def decoder_rnn(cell, inputs,
                 enc_outputs, enc_final_states,
                 seq_length, hidden_dim,

@@ -1,5 +1,6 @@
 import tensorflow as tf
 from tensorflow.contrib.framework import arg_scope
+from tensorflow.contrib.layers.python.layers import utils
 
 from layers import *
 
@@ -14,6 +15,9 @@ class Model(object):
     self.input_dim = config.input_dim
     self.hidden_dim = config.hidden_dim
     self.num_layers = config.num_layers
+
+    #MS added
+    self.num_classes = 4
 
     self.max_enc_length = config.max_enc_length
     self.max_dec_length = config.max_dec_length
@@ -43,13 +47,15 @@ class Model(object):
     )
 
     self.enc_inputs, self.dec_targets, self.enc_seq_length, self.dec_seq_length, self.mask = \
-        tf.contrib.layers.utils.smart_cond(
+        utils.smart_cond(
             self.is_training,
             lambda: (inputs['train'], labels['train'], enc_seq_length['train'],
                      dec_seq_length['train'], mask['train']),
             lambda: (inputs['test'], labels['test'], enc_seq_length['test'],
                      dec_seq_length['test'], mask['test'])
         )
+    print self.enc_inputs.shape
+    print 'DEC TARGETS', self.dec_targets
 
     if self.use_terminal_symbol:
       self.dec_seq_length += 1 # terminal symbol
@@ -57,8 +63,8 @@ class Model(object):
     self._build_model()
     self._build_steps()
 
-    if not reuse:
-      self._build_optim()
+    # if not reuse:
+    #   self._build_optim()
 
     self.train_summary = tf.summary.merge([
         tf.summary.scalar("train/total_loss", self.total_loss),
@@ -110,9 +116,10 @@ class Model(object):
           self.hidden_dim,
           initializer=self.initializer)
 
-      if self.num_layers > 1:
-        cells = [self.enc_cell] * self.num_layers
-        self.enc_cell = MultiRNNCell(cells)
+      # if self.num_layers > 1:
+      #   cells = [self.enc_cell] * self.num_layers
+        # self.enc_cell = MultiRNNCell(cells)
+      self.enc_cell = rnn.MultiRNNCell([self.enc_cell] * self.num_layers, state_is_tuple=True)
       self.enc_init_state = trainable_initial_state(
           batch_size, self.enc_cell.state_size)
 
@@ -121,95 +128,163 @@ class Model(object):
           self.enc_cell, self.embeded_enc_inputs,
           self.enc_seq_length, self.enc_init_state)
 
-      if self.use_terminal_symbol:
-        # 0 index indicates terminal
-        self.first_decoder_input = tf.expand_dims(trainable_initial_state(
-            batch_size, self.hidden_dim, name="first_decoder_input"), 1)
-        self.enc_outputs = tf.concat_v2(
-            [self.first_decoder_input, self.enc_outputs], axis=1)
+      # initial_state = self.enc_cell.zero_state(batch_size, tf.float32)
 
-    with tf.variable_scope("dencoder"):
-      self.idx_pairs = index_matrix_to_pairs(self.dec_targets)
-      self.embeded_dec_inputs = tf.stop_gradient(
-          tf.gather_nd(self.enc_outputs, self.idx_pairs))
+      # rnn_output, rnn_state = tf.nn.dynamic_rnn(self.enc_cell, self.embeded_enc_inputs,
+      #                                       initial_state=initial_state,
+      #                                       sequence_length=self.enc_seq_length)
+      # print 'rnn state', rnn_state
+      # print 'rnn state', rnn_state.shape
 
-      if self.use_terminal_symbol:
-        tiled_zero_idxs = tf.tile(tf.zeros(
-            [1, 1], dtype=tf.int32), [batch_size, 1], name="tiled_zero_idxs")
-        self.dec_targets = tf.concat_v2([self.dec_targets, tiled_zero_idxs], axis=1)
+    #   if self.use_terminal_symbol:
+    #     # 0 index indicates terminal
+    #     self.first_decoder_input = tf.expand_dims(trainable_initial_state(
+    #         batch_size, self.hidden_dim, name="first_decoder_input"), 1)
+    #     self.enc_outputs = tf.concat(
+    #         [self.first_decoder_input, self.enc_outputs], axis=1)
 
-      self.embeded_dec_inputs = tf.concat_v2(
-          [self.first_decoder_input, self.embeded_dec_inputs], axis=1)
+    # with tf.variable_scope("dencoder"):
+    #   self.idx_pairs = index_matrix_to_pairs(self.dec_targets)
+    #   self.embeded_dec_inputs = tf.stop_gradient(
+    #       tf.gather_nd(self.enc_outputs, self.idx_pairs))
 
-      self.dec_cell = LSTMCell(
-          self.hidden_dim,
-          initializer=self.initializer)
+    #   if self.use_terminal_symbol:
+    #     tiled_zero_idxs = tf.tile(tf.zeros(
+    #         [1, 1], dtype=tf.int32), [batch_size, 1], name="tiled_zero_idxs")
+    #     self.dec_targets = tf.concat([self.dec_targets, tiled_zero_idxs], axis=1)
 
-      if self.num_layers > 1:
-        cells = [self.dec_cell] * self.num_layers
-        self.dec_cell = MultiRNNCell(cells)
+    #   self.embeded_dec_inputs = tf.concat(
+    #       [self.first_decoder_input, self.embeded_dec_inputs], axis=1)
 
-      self.dec_pred_logits, _, _ = decoder_rnn(
-          self.dec_cell, self.embeded_dec_inputs, 
-          self.enc_outputs, self.enc_final_states,
-          self.dec_seq_length, self.hidden_dim,
-          self.num_glimpse, batch_size, is_train=True,
-          initializer=self.initializer)
-      self.dec_pred_prob = tf.nn.softmax(
-          self.dec_pred_logits, 2, name="dec_pred_prob")
-      self.dec_pred = tf.argmax(
-          self.dec_pred_logits, 2, name="dec_pred")
 
-    with tf.variable_scope("dencoder", reuse=True):
-      self.dec_inference_logits, _, _ = decoder_rnn(
-          self.dec_cell, self.first_decoder_input,
-          self.enc_outputs, self.enc_final_states,
-          self.dec_seq_length, self.hidden_dim,
-          self.num_glimpse, batch_size, is_train=False,
-          initializer=self.initializer,
-          max_length=self.max_dec_length + int(self.use_terminal_symbol))
-      self.dec_inference_prob = tf.nn.softmax(
-          self.dec_inference_logits, 2, name="dec_inference_logits")
-      self.dec_inference = tf.argmax(
-          self.dec_inference_logits, 2, name="dec_inference")
 
-  def _build_optim(self):
-    losses = tf.nn.sparse_softmax_cross_entropy_with_logits(
-        labels=self.dec_targets, logits=self.dec_pred_logits)
-    inference_losses = tf.nn.sparse_softmax_cross_entropy_with_logits(
-        labels=self.dec_targets, logits=self.dec_inference_logits)
+    #   self.dec_cell = LSTMCell(
+    #       self.hidden_dim,
+    #       initializer=self.initializer)
 
-    def apply_mask(op):
-      length = tf.cast(op[:1], tf.int32)
-      loss = op[1:]
-      return tf.multiply(loss, tf.ones(length, dtype=tf.float32))
+    #   if self.num_layers > 1:
+    #     cells = [self.dec_cell] * self.num_layers
+    #     self.dec_cell = MultiRNNCell(cells)
 
-    batch_loss = tf.div(
-        tf.reduce_sum(tf.multiply(losses, self.mask)),
-        tf.reduce_sum(self.mask), name="batch_loss")
+    #   # self.dec_pred_logits, _, _ = decoder_rnn(
+    #   #     self.hidden_dim, 4, 
+    #   #     initializer=self.initializer,
+    #   #     with_softmax=True)
+    #   self.dec_pred_logits, _, _ = decoder_rnn(
+    #       self.dec_cell, self.embeded_dec_inputs, 
+    #       self.enc_outputs, self.enc_final_states,
+    #       self.dec_seq_length, self.hidden_dim,
+    #       self.num_glimpse, batch_size, is_train=True,
+    #       initializer=self.initializer)
+    #   self.dec_pred_prob = tf.nn.softmax(
+    #       self.dec_pred_logits, 2, name="dec_pred_prob")
+    #   self.dec_pred = tf.argmax(
+    #       self.dec_pred_logits, 2, name="dec_pred")
 
-    batch_inference_loss = tf.div(
-        tf.reduce_sum(tf.multiply(losses, self.mask)),
-        tf.reduce_sum(self.mask), name="batch_inference_loss")
+    # with tf.variable_scope("dencoder", reuse=True):
+    #   print 'max dec length', self.max_dec_length + int(self.use_terminal_symbol)
+    #   print (self.dec_cell, self.first_decoder_input,
+    #       self.enc_outputs, self.enc_final_states,
+    #       self.dec_seq_length, self.hidden_dim,
+    #       self.num_glimpse, batch_size)
+    #   self.dec_inference_logits, _, _ = decoder_rnn(
+    #       self.dec_cell, self.first_decoder_input,
+    #       self.enc_outputs, self.enc_final_states,
+    #       self.dec_seq_length, self.hidden_dim,
+    #       self.num_glimpse, batch_size, is_train=False,
+    #       initializer=self.initializer,
+    #       max_length=self.max_dec_length + int(self.use_terminal_symbol))
+    #   self.dec_inference_prob = tf.nn.softmax(
+    #       self.dec_inference_logits, 2, name="dec_inference_logits")
+    #   self.dec_inference = tf.argmax(
+    #       self.dec_inference_logits, 2, name="dec_inference")
 
-    tf.losses.add_loss(batch_loss)
-    total_loss = tf.losses.get_total_loss()
+    with tf.variable_scope("output_projection"):
+      W = tf.get_variable(
+          "W",
+          [self.hidden_dim, self.num_classes],
+          initializer=tf.truncated_normal_initializer(stddev=0.1))
+      b = tf.get_variable(
+          "b",
+          [self.num_classes],
+          initializer=tf.constant_initializer(0.1))
+      #we use the cell memory state for information on sentence embedding
+      self.scores = tf.nn.xw_plus_b(self.enc_final_states[-1][0], W, b)
+      self.y = tf.nn.softmax(self.scores)
+      self.predictions = tf.argmax(self.scores, 1)
 
-    self.total_loss = total_loss
-    self.target_cross_entropy_losses = losses
-    self.total_inference_loss = batch_inference_loss
+    with tf.variable_scope("loss"):
+      # self.class_weight = tf.constant([1, (1-.83)/1, (1-.03)/1, (1-.15)/1])
+      # self.weighted_logits = tf.multiply(self.scores, self.class_weight)
+      self.losses = tf.nn.softmax_cross_entropy_with_logits(
+          logits=self.scores, labels=self.dec_targets, name="ce_losses")
+      self.total_loss = tf.reduce_sum(self.losses)
+      self.mean_loss = tf.reduce_mean(self.losses)
 
+    with tf.variable_scope("accuracy"):
+      self.correct_predictions = tf.equal(self.predictions, tf.argmax(self.dec_targets, 1))
+      self.accuracy = tf.reduce_mean(tf.cast(self.correct_predictions, "float"), name="accuracy")
+
+    params = tf.trainable_variables()
+    
     self.lr = tf.train.exponential_decay(
-        self.lr_start, self.global_step, self.lr_decay_step,
-        self.lr_decay_rate, staircase=True, name="learning_rate")
+    self.lr_start, self.global_step, self.lr_decay_step,
+    self.lr_decay_rate, staircase=True, name="learning_rate")
 
-    optimizer = tf.train.AdamOptimizer(self.lr)
+    # if self.is_training:
+    with tf.name_scope("train") as scope:
+      opt = tf.train.AdamOptimizer(self.lr)
+    gradients = tf.gradients(self.losses, params)
+    clipped_gradients, norm = tf.clip_by_global_norm(gradients, self.max_grad_norm)
+    with tf.name_scope("grad_norms") as scope:
+      grad_summ = tf.summary.scalar("grad_norms", norm)
+    self.optim = opt.apply_gradients(zip(clipped_gradients, params), global_step=self.global_step)
+    loss_summ = tf.summary.scalar("{0}_loss".format("train"), self.mean_loss)
+    acc_summ = tf.summary.scalar("{0}_accuracy".format("train"), self.accuracy)
+    self.merged = tf.summary.merge([loss_summ, acc_summ])
+    self.saver = tf.train.Saver(tf.global_variables())
 
-    if self.max_grad_norm != None:
-      grads_and_vars = optimizer.compute_gradients(self.total_loss)
-      for idx, (grad, var) in enumerate(grads_and_vars):
-        if grad is not None:
-          grads_and_vars[idx] = (tf.clip_by_norm(grad, self.max_grad_norm), var)
-      self.optim = optimizer.apply_gradients(grads_and_vars, global_step=self.global_step)
-    else:
-      self.optim = optimizer.minimize(self.total_loss, global_step=self.global_step)
+
+  # def _build_optim(self):
+  #   # MS
+  #   # losses = tf.nn.softmax_cross_entropy_with_logits(labels=self.dec_targets, logits=self.dec_pred_logits)
+  #   # self.total_loss = tf.reduce_sum(losses)
+    
+  #   # original
+  #   losses = tf.nn.sparse_softmax_cross_entropy_with_logits(
+  #       labels=self.dec_targets, logits=self.dec_pred_logits)
+  #   inference_losses = tf.nn.sparse_softmax_cross_entropy_with_logits(
+  #       labels=self.dec_targets, logits=self.dec_inference_logits)
+
+  #   def apply_mask(op):
+  #     length = tf.cast(op[:1], tf.int32)
+  #     loss = op[1:]
+  #     return tf.multiply(loss, tf.ones(length, dtype=tf.float32))
+
+  #   batch_loss = tf.div(
+  #       tf.reduce_sum(tf.multiply(losses, self.mask)),
+  #       tf.reduce_sum(self.mask), name="batch_loss")
+
+  #   batch_inference_loss = tf.div(
+  #       tf.reduce_sum(tf.multiply(losses, self.mask)),
+  #       tf.reduce_sum(self.mask), name="batch_inference_loss")
+
+  #   tf.losses.add_loss(batch_loss)
+  #   total_loss = tf.losses.get_total_loss()
+
+  #   self.total_loss = total_loss
+  #   self.target_cross_entropy_losses = losses
+  #   self.total_inference_loss = batch_inference_loss
+
+    
+
+  #   optimizer = tf.train.AdamOptimizer(self.lr)
+
+  #   if self.max_grad_norm != None:
+  #     grads_and_vars = optimizer.compute_gradients(self.total_loss)
+  #     for idx, (grad, var) in enumerate(grads_and_vars):
+  #       if grad is not None:
+  #         grads_and_vars[idx] = (tf.clip_by_norm(grad, self.max_grad_norm), var)
+  #     self.optim = optimizer.apply_gradients(grads_and_vars, global_step=self.global_step)
+  #   else:
+  #     self.optim = optimizer.minimize(self.total_loss, global_step=self.global_step)

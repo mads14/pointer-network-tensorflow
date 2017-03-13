@@ -27,6 +27,8 @@ class Trainer(object):
     else:
       raise Exception("[!] Unknown task: {}".format(config.task))
 
+    print 'x: ',self.data_loader.x
+    print 'y: ',self.data_loader.y
     self.model = Model(
         config,
         inputs=self.data_loader.x,
@@ -88,8 +90,9 @@ class Trainer(object):
 
   def _test(self, summary_writer):
     fetch = {
-        'loss': self.model.total_inference_loss,
-        'pred': self.model.dec_inference,
+        'loss': self.model.total_loss,
+        # 'pred': self.model.dec_inference,
+        'pred': self.model.y,
         'true': self.model.dec_targets,
     }
     result = self.model.test(self.sess, fetch, summary_writer)

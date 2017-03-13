@@ -49,15 +49,24 @@ def generate_one_example(n_nodes, rng):
   return nodes, solutions
 
 def read_paper_dataset(paths, max_length):
+  i=0
   x, y = [], []
   for path in paths:
     tf.logging.info("Read dataset {} which is used in the paper..".format(path))
     length = max(re.findall('\d+', path))
     with open(path) as f:
       for l in tqdm(f):
+        i+=1
         inputs, outputs = l.split(' output ')
-        x.append(np.array(inputs.split(), dtype=np.float32).reshape([-1, 2]))
-        y.append(np.array(outputs.split(), dtype=np.int32)[:-1]) # skip the last one
+        #MS
+        # print np.array(inputs.split(), dtype=np.float32).reshape([-1, 3])
+        # this seems fine:
+        # print i, np.array(outputs.split(), dtype=np.float32)
+        x.append(np.array(inputs.split(), dtype=np.float32).reshape([-1, 3]))
+        y.append(np.array(outputs.split(), dtype=np.int32))
+        # original
+        # x.append(np.array(inputs.split(), dtype=np.float32).reshape([-1, 2]))
+        #y.append(np.array(outputs.split(), dtype=np.int32)[:-1]) # skip the last one
   return x, y
 
 class TSPDataLoader(object):
@@ -72,7 +81,7 @@ class TSPDataLoader(object):
 
     self.is_train = config.is_train
     self.use_terminal_symbol = config.use_terminal_symbol
-    self.random_seed = config.random_seed
+    self.random_seed = {'train': config.random_seed, 'test':config.random_seed+372}
 
     self.data_num = {}
     self.data_num['train'] = config.train_num
@@ -89,7 +98,13 @@ class TSPDataLoader(object):
     self.queue_ops, self.enqueue_ops = None, None
     self.x, self.y, self.seq_length, self.mask = None, None, None, None
 
-    paths = self.download_google_drive_file()
+    # MS
+    # paths = {'train':'data2/tsp135_norm.txt', 'test':'data2/tsp135_norm.txt'}
+    paths = {'train':'data2/lstm/all_trips_normed.csv', 
+             'test':'data2/lstm/all_trips_normed.csv'}
+    # original
+    # paths = self.download_google_drive_file()
+
     if len(paths) != 0:
       self._maybe_generate_and_save(except_list=paths.keys())
       for name, path in paths.items():
@@ -103,6 +118,7 @@ class TSPDataLoader(object):
     self.queue_ops, self.enqueue_ops = {}, {}
     self.x, self.y, self.seq_length, self.mask = {}, {}, {}, {}
 
+    print 'keys', self.data_num.keys()
     for name in self.data_num.keys():
       self.input_ops[name] = tf.placeholder(tf.float32, shape=[None, None])
       self.target_ops[name] = tf.placeholder(tf.int32, shape=[None])
@@ -114,15 +130,28 @@ class TSPDataLoader(object):
           capacity=capacity,
           min_after_dequeue=min_after_dequeue,
           dtypes=[tf.float32, tf.int32],
-          shapes=[[self.max_length, 2,], [self.max_length]],
-          seed=self.random_seed,
+          # MS
+          shapes=[[self.max_length, 3,], [4]],
+          # original
+          # shapes=[[self.max_length, 2,], [self.max_length]],
+          seed=self.random_seed[name],
           name="random_queue_{}".format(name))
       self.enqueue_ops[name] = \
           self.queue_ops[name].enqueue([self.input_ops[name], self.target_ops[name]])
 
-      inputs, labels = self.queue_ops[name].dequeue()
 
-      seq_length = tf.shape(inputs)[0]
+      inputs, labels = self.queue_ops[name].dequeue()
+      print "inputs", inputs.shape
+      # if sum(labels) == 0:
+      print 'label', labels
+
+      # original
+      # seq_length = tf.shape(inputs)[0]
+      # MS
+      seq_length = 4
+      print 'seq_len', seq_length
+
+      #TODO check on mask size?
       if self.use_terminal_symbol:
         mask = tf.ones([seq_length + 1], dtype=tf.float32) # terminal symbol
       else:
@@ -135,12 +164,14 @@ class TSPDataLoader(object):
               capacity=capacity,
               dynamic_pad=True,
               name="batch_and_pad")
+      print 'self.seq_len', self.seq_length[name]
 
   def run_input_queue(self, sess):
     self.threads = []
     self.coord = tf.train.Coordinator()
 
     for name in self.data_num.keys():
+      print name, 'x', len(self.data[name].x), 'y', len(self.data[name].y)
       def load_and_enqueue(sess, name, input_ops, target_ops, enqueue_ops, coord):
         idx = 0
         while not coord.should_stop():
@@ -149,7 +180,9 @@ class TSPDataLoader(object):
               target_ops[name]: self.data[name].y[idx],
           }
           sess.run(self.enqueue_ops[name], feed_dict=feed_dict)
+          # print [idx, self.data[name].y[idx]]
           idx = idx+1 if idx+1 <= len(self.data[name].x) - 1 else 0
+
 
       args = (sess, name, self.input_ops, self.target_ops, self.enqueue_ops, self.coord)
       t = threading.Thread(target=load_and_enqueue, args=args)
@@ -170,7 +203,6 @@ class TSPDataLoader(object):
         tf.logging.info("Skip creating {} because of given except_list {}".format(name, except_list))
         continue
       path = self.get_path(name)
-
       if not os.path.exists(path):
         tf.logging.info("Creating {} for [{}]".format(path, self.task))
 
@@ -209,7 +241,6 @@ class TSPDataLoader(object):
           if search_key.startswith(key):
             path = os.path.join(self.data_dir, search_key)
             tf.logging.info("Download dataset of the paper to {}".format(path))
-
             if not os.path.exists(path):
               download_file_from_google_drive(GOOGLE_DRIVE_IDS[search_key], path)
               if path.endswith('zip'):
@@ -229,11 +260,15 @@ class TSPDataLoader(object):
 
     x_list, y_list = read_paper_dataset(paths, self.max_length)
 
-    x = np.zeros([len(x_list), self.max_length, 2], dtype=np.float32)
-    y = np.zeros([len(y_list), self.max_length], dtype=np.int32)
+    #original
+    # x = np.zeros([len(x_list), self.max_length, 2], dtype=np.float32)
+    # y = np.zeros([len(y_list), self.max_length], dtype=np.int32)
+    #MS
+    x = np.zeros([len(x_list), self.max_length, 3], dtype=np.float32)
+    y = np.zeros([len(y_list), 4], dtype=np.int32)
 
     for idx, (nodes, res) in enumerate(tqdm(zip(x_list, y_list))):
-      x[idx,:len(nodes)] = nodes
+      x[idx,:min(self.max_length,len(nodes))] = nodes[:min(self.max_length,len(nodes))]
       y[idx,:len(res)] = res
 
     if self.data is None:
