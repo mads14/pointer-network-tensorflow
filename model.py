@@ -20,8 +20,8 @@ class Model(object):
     self.num_classes = 4
 
     self.max_enc_length = config.max_enc_length
-    self.max_dec_length = config.max_dec_length
-    self.num_glimpse = config.num_glimpse
+    # self.max_dec_length = config.max_dec_length
+    # self.num_glimpse = config.num_glimpse
 
     self.init_min_val = config.init_min_val
     self.init_max_val = config.init_max_val
@@ -54,8 +54,8 @@ class Model(object):
             lambda: (inputs['test'], labels['test'], enc_seq_length['test'],
                      dec_seq_length['test'], mask['test'])
         )
-    print self.enc_inputs.shape
-    print 'DEC TARGETS', self.dec_targets
+    print self.enc_inputs.shape #(128, 135, 3)
+    print 'DEC TARGETS', self.dec_targets # shape=(128, 4) ((one batch))
 
     if self.use_terminal_symbol:
       self.dec_seq_length += 1 # terminal symbol
@@ -116,9 +116,7 @@ class Model(object):
           self.hidden_dim,
           initializer=self.initializer)
 
-      # if self.num_layers > 1:
-      #   cells = [self.enc_cell] * self.num_layers
-        # self.enc_cell = MultiRNNCell(cells)
+
       self.enc_cell = rnn.MultiRNNCell([self.enc_cell] * self.num_layers, state_is_tuple=True)
       self.enc_init_state = trainable_initial_state(
           batch_size, self.enc_cell.state_size)
