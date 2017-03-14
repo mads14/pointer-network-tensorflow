@@ -161,8 +161,6 @@ class TSPDataLoader(object):
       else:
         raise Exception("{} dataset not specified").format(name)
 
-    tf.logging.info("Can't found dataset from the paper!")
-    return paths
 
   def read_zip_and_update_data(self, path, name):
     if path.endswith('zip'):
