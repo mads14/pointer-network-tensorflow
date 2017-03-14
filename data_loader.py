@@ -12,41 +12,12 @@ from collections import namedtuple
 import tensorflow as tf
 from download import download_file_from_google_drive
 
-GOOGLE_DRIVE_IDS = {
-    'tsp5_train.zip': '0B2fg8yPGn2TCSW1pNTJMXzFPYTg',
-    'tsp10_train.zip': '0B2fg8yPGn2TCbHowM0hfOTJCNkU',
-    'tsp5-20_train.zip': '0B2fg8yPGn2TCTWNxX21jTDBGeXc',
-    'tsp50_train.zip': '0B2fg8yPGn2TCaVQxSl9ab29QajA',
-    'tsp20_test.txt': '0B2fg8yPGn2TCdF9TUU5DZVNCNjQ',
-    'tsp40_test.txt': '0B2fg8yPGn2TCcjFrYk85SGFVNlU',
-    'tsp50_test.txt.zip': '0B2fg8yPGn2TCUVlCQmQtelpZTTQ',
-}
 
 TSP = namedtuple('TSP', ['x', 'y', 'name'])
 
 def length(x, y):
   return np.linalg.norm(np.asarray(x) - np.asarray(y))
 
-# https://gist.github.com/mlalevic/6222750
-def solve_tsp_dynamic(points):
-  #calc all lengths
-  all_distances = [[length(x,y) for y in points] for x in points]
-  #initial value - just distance from 0 to every other point + keep the track of edges
-  A = {(frozenset([0, idx+1]), idx+1): (dist, [0,idx+1]) for idx,dist in enumerate(all_distances[0][1:])}
-  cnt = len(points)
-  for m in range(2, cnt):
-    B = {}
-    for S in [frozenset(C) | {0} for C in itertools.combinations(range(1, cnt), m)]:
-      for j in S - {0}:
-        B[(S, j)] = min( [(A[(S-{j},k)][0] + all_distances[k][j], A[(S-{j},k)][1] + [j]) for k in S if k != 0 and k!=j])  #this will use 0th index of tuple for ordering, the same as if key=itemgetter(0) used
-    A = B
-  res = min([(A[d][0] + all_distances[0][d[1]], A[d][1]) for d in iter(A)])
-  return np.asarray(res[1]) + 1 # 0 for padding
-
-def generate_one_example(n_nodes, rng):
-  nodes = rng.rand(n_nodes, 2).astype(np.float32)
-  solutions = solve_tsp_dynamic(nodes)
-  return nodes, solutions
 
 def read_paper_dataset(paths, max_length):
   i=0
@@ -58,17 +29,11 @@ def read_paper_dataset(paths, max_length):
       for l in tqdm(f):
         i+=1
         inputs, outputs = l.split(' output ')
-        #MS
-        # print np.array(inputs.split(), dtype=np.float32).reshape([-1, 3])
-        # this seems fine:
-        # print i, np.array(outputs.split(), dtype=np.float32)
         x.append(np.array(inputs.split(), dtype=np.float32).reshape([-1, 3]))
         y.append(np.array(outputs.split(), dtype=np.int32))
-        # original
-        # x.append(np.array(inputs.split(), dtype=np.float32).reshape([-1, 2]))
-        #y.append(np.array(outputs.split(), dtype=np.int32)[:-1]) # skip the last one
   return x, y
 
+#todo change name from tsp data loader
 class TSPDataLoader(object):
   def __init__(self, config, rng=None):
     self.config = config
@@ -98,19 +63,16 @@ class TSPDataLoader(object):
     self.queue_ops, self.enqueue_ops = None, None
     self.x, self.y, self.seq_length, self.mask = None, None, None, None
 
-    # MS
-    # paths = {'train':'data2/tsp135_norm.txt', 'test':'data2/tsp135_norm.txt'}
     paths = {'train':'data2/lstm/all_trips_normed.csv', 
              'test':'data2/lstm/all_trips_normed.csv'}
-    # original
-    # paths = self.download_google_drive_file()
 
     if len(paths) != 0:
+      #todo change to be check that train and test data exist
       self._maybe_generate_and_save(except_list=paths.keys())
       for name, path in paths.items():
         self.read_zip_and_update_data(path, name)
     else:
-      self._maybe_generate_and_save()
+      raise Exception("Must specify train and test dataset paths!")
     self._create_input_queue()
 
   def _create_input_queue(self, queue_capacity_factor=16):
@@ -118,7 +80,6 @@ class TSPDataLoader(object):
     self.queue_ops, self.enqueue_ops = {}, {}
     self.x, self.y, self.seq_length, self.mask = {}, {}, {}, {}
 
-    print 'keys', self.data_num.keys()
     for name in self.data_num.keys():
       self.input_ops[name] = tf.placeholder(tf.float32, shape=[None, None])
       self.target_ops[name] = tf.placeholder(tf.int32, shape=[None])
@@ -139,17 +100,13 @@ class TSPDataLoader(object):
       self.enqueue_ops[name] = \
           self.queue_ops[name].enqueue([self.input_ops[name], self.target_ops[name]])
 
-
       inputs, labels = self.queue_ops[name].dequeue()
-      print "inputs", inputs.shape
-      # if sum(labels) == 0:
-      print 'label', labels
+      
 
       # original
       # seq_length = tf.shape(inputs)[0]
       # MS
       seq_length = 4
-      print 'seq_len', seq_length
 
       #TODO check on mask size?
       if self.use_terminal_symbol:
@@ -180,7 +137,6 @@ class TSPDataLoader(object):
               target_ops[name]: self.data[name].y[idx],
           }
           sess.run(self.enqueue_ops[name], feed_dict=feed_dict)
-          # print [idx, self.data[name].y[idx]]
           idx = idx+1 if idx+1 <= len(self.data[name].x) - 1 else 0
 
 
@@ -202,51 +158,8 @@ class TSPDataLoader(object):
       if name in except_list:
         tf.logging.info("Skip creating {} because of given except_list {}".format(name, except_list))
         continue
-      path = self.get_path(name)
-      if not os.path.exists(path):
-        tf.logging.info("Creating {} for [{}]".format(path, self.task))
-
-        x = np.zeros([num, self.max_length, 2], dtype=np.float32)
-        y = np.zeros([num, self.max_length], dtype=np.int32)
-
-        for idx in trange(num, desc="Create {} data".format(name)):
-          n_nodes = self.rng.randint(self.min_length, self.max_length+ 1)
-          nodes, res = generate_one_example(n_nodes, self.rng)
-          x[idx,:len(nodes)] = nodes
-          y[idx,:len(res)] = res
-
-        np.savez(path, x=x, y=y)
-        self.data[name] = TSP(x=x, y=y, name=name)
       else:
-        tf.logging.info("Skip creating {} for [{}]".format(path, self.task))
-        tmp = np.load(path)
-        self.data[name] = TSP(x=tmp['x'], y=tmp['y'], name=name)
-
-  def get_path(self, name):
-    return os.path.join(
-        self.data_dir, "{}_{}={}.npz".format(
-            self.task_name, name, self.data_num[name]))
-
-  def download_google_drive_file(self):
-    paths = {}
-    for mode in ['train', 'test']:
-      candidates = []
-      candidates.append(
-          '{}{}_{}'.format(self.task, self.max_length, mode))
-      candidates.append(
-          '{}{}-{}_{}'.format(self.task, self.min_length, self.max_length, mode))
-
-      for key in candidates:
-        for search_key in GOOGLE_DRIVE_IDS.keys():
-          if search_key.startswith(key):
-            path = os.path.join(self.data_dir, search_key)
-            tf.logging.info("Download dataset of the paper to {}".format(path))
-            if not os.path.exists(path):
-              download_file_from_google_drive(GOOGLE_DRIVE_IDS[search_key], path)
-              if path.endswith('zip'):
-                with zipfile.ZipFile(path, 'r') as z:
-                  z.extractall(self.data_dir)
-            paths[mode] = path
+        raise Exception("{} dataset not specified").format(name)
 
     tf.logging.info("Can't found dataset from the paper!")
     return paths
@@ -260,10 +173,6 @@ class TSPDataLoader(object):
 
     x_list, y_list = read_paper_dataset(paths, self.max_length)
 
-    #original
-    # x = np.zeros([len(x_list), self.max_length, 2], dtype=np.float32)
-    # y = np.zeros([len(y_list), self.max_length], dtype=np.int32)
-    #MS
     x = np.zeros([len(x_list), self.max_length, 3], dtype=np.float32)
     y = np.zeros([len(y_list), 4], dtype=np.int32)
 
