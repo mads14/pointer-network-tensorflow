@@ -29,8 +29,10 @@ def read_paper_dataset(paths, max_length):
       for l in tqdm(f):
         i+=1
         inputs, outputs = l.split(' output ')
-        x.append(np.array(inputs.split(), dtype=np.float32).reshape([-1, 3]))
-        y.append(np.array(outputs.split(), dtype=np.int32))
+        _x = np.array(inputs.split(), dtype=np.float32).reshape([-1, 3])
+        if len(_x) >= 5:
+          x.append(np.array(inputs.split(), dtype=np.float32).reshape([-1, 3]))
+          y.append(np.array(outputs.split(), dtype=np.int32))
   return x, y
 
 #todo change name from tsp data loader
@@ -63,8 +65,8 @@ class TSPDataLoader(object):
     self.queue_ops, self.enqueue_ops = None, None
     self.x, self.y, self.seq_length, self.mask = None, None, None, None
 
-    paths = {'train':'data2/lstm/all_trips_normed.csv', 
-             'test':'data2/lstm/all_trips_normed.csv'}
+    paths = {'train':'data2/lstm/train_trips_normed.csv', 
+             'test':'data2/lstm/test_trips_normed.csv'}
 
     if len(paths) != 0:
       #todo change to be check that train and test data exist
@@ -92,7 +94,7 @@ class TSPDataLoader(object):
           min_after_dequeue=min_after_dequeue,
           dtypes=[tf.float32, tf.int32],
           # MS
-          shapes=[[self.max_length, 3,], [4]],
+          shapes=[[self.max_length, 3,], [7]],
           # original
           # shapes=[[self.max_length, 2,], [self.max_length]],
           seed=self.random_seed[name],
@@ -106,7 +108,7 @@ class TSPDataLoader(object):
       # original
       # seq_length = tf.shape(inputs)[0]
       # MS
-      seq_length = 4
+      seq_length = 7
 
       #TODO check on mask size?
       if self.use_terminal_symbol:
@@ -172,7 +174,7 @@ class TSPDataLoader(object):
     x_list, y_list = read_paper_dataset(paths, self.max_length)
 
     x = np.zeros([len(x_list), self.max_length, 3], dtype=np.float32)
-    y = np.zeros([len(y_list), 4], dtype=np.int32)
+    y = np.zeros([len(y_list), 7], dtype=np.int32)
 
     for idx, (nodes, res) in enumerate(tqdm(zip(x_list, y_list))):
       x[idx,:min(self.max_length,len(nodes))] = nodes[:min(self.max_length,len(nodes))]

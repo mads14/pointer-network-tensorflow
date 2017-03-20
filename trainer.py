@@ -7,9 +7,11 @@ from tensorflow.contrib.framework.python.ops import arg_scope
 from model import Model
 from utils import show_all_variables
 from data_loader import TSPDataLoader
+# from __future__ import division
 
 class Trainer(object):
   def __init__(self, config, rng):
+    np.set_printoptions(formatter={'float':lambda x: '%.3f'%x})
     self.config = config
     self.rng = rng
 
@@ -21,6 +23,8 @@ class Trainer(object):
     self.max_step = config.max_step
     self.num_log_samples = config.num_log_samples
     self.checkpoint_secs = config.checkpoint_secs
+
+    self.print_logits = True
 
     if config.task.lower().startswith('tsp'):
       self.data_loader = TSPDataLoader(config, rng=self.rng)
@@ -92,16 +96,32 @@ class Trainer(object):
     fetch = {
         'loss': self.model.total_loss,
         # 'pred': self.model.dec_inference,
-        'pred': self.model.y,
+        'logits': self.model.y,
         'true': self.model.dec_targets,
     }
     result = self.model.test(self.sess, fetch, summary_writer)
 
+    correct = np.count_nonzero(np.argmax(result['true'],1)==np.argmax(result['logits'],1))
+    print [np.count_nonzero((np.argmax(result['true'],1)==np.argmax(result['logits'],1))
+           & (np.argmax(result['true'],1)==i))/float((max(1,np.count_nonzero(np.argmax(result['true'],1)==i)))) 
+           for i in range(7)]
+    print correct
+    accuracy = float(correct)/len(result['logits'])
+
     tf.logging.info("")
     tf.logging.info("test loss: {}".format(result['loss']))
+    tf.logging.info("test accuracy: {}".format(accuracy))
+
+
     for idx in range(self.num_log_samples):
-      pred, true = result['pred'][idx], result['true'][idx]
-      tf.logging.info("test pred: {}".format(pred))
+      logits, true = result['logits'][idx], result['true'][idx]
+      pred = np.array([int(i) for i in np.binary_repr(2**np.argmax(logits)).zfill(7)[::-1]])
+
+      if self.print_logits:
+        tf.logging.info("test logits: {}".format(logits))
+      
+      else:
+        tf.logging.info("test logits: {}".format(pred))
       tf.logging.info("test true: {} ({})".format(true, np.array_equal(pred, true)))
 
     if summary_writer:

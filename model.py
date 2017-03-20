@@ -17,11 +17,9 @@ class Model(object):
     self.num_layers = config.num_layers
 
     #MS added
-    self.num_classes = 4
+    self.num_classes = 7
 
     self.max_enc_length = config.max_enc_length
-    # self.max_dec_length = config.max_dec_length
-    # self.num_glimpse = config.num_glimpse
 
     self.init_min_val = config.init_min_val
     self.init_max_val = config.init_max_val
@@ -124,8 +122,9 @@ class Model(object):
       self.enc_outputs, self.enc_final_states = tf.nn.dynamic_rnn(
           self.enc_cell, self.embeded_enc_inputs,
           self.enc_seq_length, self.enc_init_state)
+      print 'enc_out', self.enc_outputs
 
-
+    print 'enc_final_states', self.enc_final_states
     with tf.variable_scope("output_projection"):
       W = tf.get_variable(
           "W",
