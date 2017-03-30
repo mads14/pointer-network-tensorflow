@@ -1,3 +1,4 @@
+from __future__ import division
 import os
 import numpy as np
 from tqdm import trange
@@ -6,8 +7,9 @@ from tensorflow.contrib.framework.python.ops import arg_scope
 
 from model import Model
 from utils import show_all_variables
-from data_loader import TSPDataLoader
-# from __future__ import division
+from data_loader import S2LDataLoader
+from sklearn.metrics import confusion_matrix
+import matplotlib.pyplot as plt
 
 class Trainer(object):
   def __init__(self, config, rng):
@@ -24,22 +26,20 @@ class Trainer(object):
     self.num_log_samples = config.num_log_samples
     self.checkpoint_secs = config.checkpoint_secs
 
+    # MS added
     self.print_logits = True
 
-    if config.task.lower().startswith('tsp'):
-      self.data_loader = TSPDataLoader(config, rng=self.rng)
+    if config.task.lower().startswith('s2l'):
+      self.data_loader = S2LDataLoader(config, rng=self.rng)
     else:
       raise Exception("[!] Unknown task: {}".format(config.task))
 
-    print 'x: ',self.data_loader.x
-    print 'y: ',self.data_loader.y
     self.model = Model(
         config,
         inputs=self.data_loader.x,
         labels=self.data_loader.y,
         enc_seq_length=self.data_loader.seq_length,
-        dec_seq_length=self.data_loader.seq_length,
-        mask=self.data_loader.mask)
+        dec_seq_length=self.data_loader.seq_length)
 
     self.build_session()
     show_all_variables()
@@ -87,26 +87,62 @@ class Trainer(object):
     tf.logging.info("Testing starts...")
     self.data_loader.run_input_queue(self.sess)
 
+    test_predictions = []
+    test_labels = []
     for idx in range(10):
-      self._test(None)
+      _predictions, _labels = self._test(None, True)
+      test_predictions.extend(_predictions)
+      test_labels.extend(_labels)
+
+    print confusion_matrix(y_true = test_labels, y_pred = test_predictions)
+
+
+
 
     self.data_loader.stop_input_queue()
 
-  def _test(self, summary_writer):
-    fetch = {
-        'loss': self.model.total_loss,
-        # 'pred': self.model.dec_inference,
-        'logits': self.model.y,
-        'true': self.model.dec_targets,
-    }
-    result = self.model.test(self.sess, fetch, summary_writer)
+  def calc_accuracy(self, predictions, labels):
+    correct = predictions == labels
+    correct_byclass = [np.count_nonzero(correct & (labels == i)) for 
+      i in range(self.model.num_classes)]
 
-    correct = np.count_nonzero(np.argmax(result['true'],1)==np.argmax(result['logits'],1))
-    print [np.count_nonzero((np.argmax(result['true'],1)==np.argmax(result['logits'],1))
-           & (np.argmax(result['true'],1)==i))/float((max(1,np.count_nonzero(np.argmax(result['true'],1)==i)))) 
-           for i in range(7)]
-    print correct
-    accuracy = float(correct)/len(result['logits'])
+    precision = [str(correct_byclass[i])+'/'+str(np.count_nonzero(predictions==i)) for 
+      i in range(self.model.num_classes)]
+      #number correct by class / total predicted in class 
+
+    recall = [str(correct_byclass[i])+'/'+str(np.count_nonzero(labels==i)) for 
+      i in range(self.model.num_classes)]
+      # number correct by class / total (true) class membership
+
+    accuracy = float(np.count_nonzero(correct))/len(labels)
+    print np.count_nonzero(correct)
+    print 'precision per class', precision
+    print 'recall per class', recall
+
+    return accuracy
+    
+     
+
+
+  def _test(self, summary_writer, plot = False):
+    if plot:
+      fetch = {
+          'loss': self.model.total_loss,
+          'logits': self.model.y,
+          'inputs': self.model.enc_inputs,
+          'input_len': self.model.enc_seq_length,
+          'true': self.model.dec_targets,
+      }
+    else:
+      fetch = {
+          'loss': self.model.total_loss,
+          'logits': self.model.y,
+          'true': self.model.dec_targets,
+      }
+    result = self.model.test(self.sess, fetch, summary_writer)
+    predictions = np.argmax(result['logits'],1)
+    labels = np.argmax(result['true'],1)
+    accuracy = self.calc_accuracy(predictions,labels)
 
     tf.logging.info("")
     tf.logging.info("test loss: {}".format(result['loss']))
@@ -126,6 +162,20 @@ class Trainer(object):
 
     if summary_writer:
       summary_writer.add_summary(result['summary'], result['step'])
+              #car,  walk, train,   bus,    subwas,  tram,   cable car
+    colors = ['blue','red','green','black','orange','purple','grey']
+    if plot:
+      for i in range(len(predictions)):
+        x = result["inputs"][i][0:result["input_len"][i]]
+        # color = colors[6-predictions[i]]
+        if labels[i] != predictions[i]:
+          plt.plot(x[:,1], x[:,0], color=colors[6-predictions[i]], linewidth=2.0)
+          plt.plot(x[:,1], x[:,0], 'o', color=colors[6-labels[i]])
+        else:
+          plt.plot(x[:,1], x[:,0], color=colors[6-predictions[i]])
+        # print x, labels[i], color, predictions[i]
+      plt.show()
+    return predictions, labels
 
   def _get_summary_writer(self, result):
     if result['step'] % self.log_step == 0:

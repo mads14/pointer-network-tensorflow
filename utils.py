@@ -22,10 +22,12 @@ def prepare_dirs_and_logger(config):
   logger.setLevel(tf.logging.INFO)
 
   if config.load_path:
-    if config.load_path.startswith(config.task):
-      config.model_name = config.load_path
-    else:
-      config.model_name = "{}_{}".format(config.task, config.load_path)
+    #TODO: uncomment - commented out for now because just changed task name 
+    # from tsp(traveling sales person) to s2l (sequence to label)
+    # if config.load_path.startswith(config.task):
+    config.model_name = config.load_path
+    # else:
+    #   config.model_name = "{}_{}".format(config.task, config.load_path)
   else:
     config.model_name = "{}_{}".format(config.task, get_time())
 

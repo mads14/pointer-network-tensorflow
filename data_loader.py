@@ -12,31 +12,31 @@ from collections import namedtuple
 import tensorflow as tf
 from download import download_file_from_google_drive
 
-
-TSP = namedtuple('TSP', ['x', 'y', 'name'])
+#S2L: sequence to label
+S2L = namedtuple('S2L', ['x', 'y', 'seq_lengths', 'name'])
 
 def length(x, y):
   return np.linalg.norm(np.asarray(x) - np.asarray(y))
 
 
-def read_paper_dataset(paths, max_length):
+def read_dataset(paths, max_length, min_length, input_dim):
   i=0
   x, y = [], []
   for path in paths:
-    tf.logging.info("Read dataset {} which is used in the paper..".format(path))
-    length = max(re.findall('\d+', path))
+    tf.logging.info("Read dataset {} ".format(path))
     with open(path) as f:
       for l in tqdm(f):
         i+=1
         inputs, outputs = l.split(' output ')
-        _x = np.array(inputs.split(), dtype=np.float32).reshape([-1, 3])
-        if len(_x) >= 5:
-          x.append(np.array(inputs.split(), dtype=np.float32).reshape([-1, 3]))
+        _x = np.array(inputs.split(), dtype=np.float32).reshape([-1, input_dim])
+        if len(_x) >= min_length:
+          x.append(_x)
           y.append(np.array(outputs.split(), dtype=np.int32))
   return x, y
 
-#todo change name from tsp data loader
-class TSPDataLoader(object):
+#sequence to label data loader
+class S2LDataLoader(object):
+  
   def __init__(self, config, rng=None):
     self.config = config
     self.rng = rng
@@ -45,9 +45,10 @@ class TSPDataLoader(object):
     self.batch_size = config.batch_size
     self.min_length = config.min_data_length
     self.max_length = config.max_data_length
+    self.input_dim = config.input_dim
+    self.output_dim = config.output_dim
 
     self.is_train = config.is_train
-    self.use_terminal_symbol = config.use_terminal_symbol
     self.random_seed = {'train': config.random_seed, 'test':config.random_seed+372}
 
     self.data_num = {}
@@ -65,11 +66,11 @@ class TSPDataLoader(object):
     self.queue_ops, self.enqueue_ops = None, None
     self.x, self.y, self.seq_length, self.mask = None, None, None, None
 
-    paths = {'train':'data2/lstm/train_trips_normed.csv', 
-             'test':'data2/lstm/test_trips_normed.csv'}
+    paths = {'train':'data/train_trips_normed.csv', 
+             'test':'data/test_trips_normed.csv'}
 
     if len(paths) != 0:
-      #todo change to be check that train and test data exist
+      #todo change from gen_and_save to check_paths_exist
       self._maybe_generate_and_save(except_list=paths.keys())
       for name, path in paths.items():
         self.read_zip_and_update_data(path, name)
@@ -78,13 +79,15 @@ class TSPDataLoader(object):
     self._create_input_queue()
 
   def _create_input_queue(self, queue_capacity_factor=16):
-    self.input_ops, self.target_ops = {}, {}
+    self.input_ops, self.target_ops, self.len_ops = {}, {}, {}
     self.queue_ops, self.enqueue_ops = {}, {}
-    self.x, self.y, self.seq_length, self.mask = {}, {}, {}, {}
+    self.x, self.y, self.seq_length = {}, {}, {}
 
     for name in self.data_num.keys():
       self.input_ops[name] = tf.placeholder(tf.float32, shape=[None, None])
       self.target_ops[name] = tf.placeholder(tf.int32, shape=[None])
+      # store the early stop lengths of each input tensor
+      self.len_ops[name] = tf.placeholder(tf.int32, shape=[None], name="early_stop")
 
       min_after_dequeue = 1000
       capacity = min_after_dequeue + 3 * self.batch_size
@@ -92,57 +95,44 @@ class TSPDataLoader(object):
       self.queue_ops[name] = tf.RandomShuffleQueue(
           capacity=capacity,
           min_after_dequeue=min_after_dequeue,
-          dtypes=[tf.float32, tf.int32],
-          # MS
-          shapes=[[self.max_length, 3,], [7]],
-          # original
-          # shapes=[[self.max_length, 2,], [self.max_length]],
+          dtypes=[tf.float32, tf.int32, tf.int32],
+          shapes=[[self.max_length, self.input_dim,], [self.output_dim],[1]],
           seed=self.random_seed[name],
           name="random_queue_{}".format(name))
       self.enqueue_ops[name] = \
-          self.queue_ops[name].enqueue([self.input_ops[name], self.target_ops[name]])
+          self.queue_ops[name].enqueue([self.input_ops[name], self.target_ops[name], 
+            self.len_ops[name]])
 
-      inputs, labels = self.queue_ops[name].dequeue()
-      
+      inputs, labels, seq_length = self.queue_ops[name].dequeue()
 
-      # original
-      # seq_length = tf.shape(inputs)[0]
-      # MS
-      seq_length = 7
 
-      #TODO check on mask size?
-      if self.use_terminal_symbol:
-        mask = tf.ones([seq_length + 1], dtype=tf.float32) # terminal symbol
-      else:
-        mask = tf.ones([seq_length], dtype=tf.float32)
-
-      self.x[name], self.y[name], self.seq_length[name], self.mask[name] = \
+      self.x[name], self.y[name], self.seq_length[name] = \
           tf.train.batch(
-              [inputs, labels, seq_length, mask],
+              [inputs, labels, seq_length],
               batch_size=self.batch_size,
               capacity=capacity,
               dynamic_pad=True,
               name="batch_and_pad")
-      print 'self.seq_len', self.seq_length[name]
 
   def run_input_queue(self, sess):
     self.threads = []
     self.coord = tf.train.Coordinator()
 
     for name in self.data_num.keys():
-      print name, 'x', len(self.data[name].x), 'y', len(self.data[name].y)
-      def load_and_enqueue(sess, name, input_ops, target_ops, enqueue_ops, coord):
+      def load_and_enqueue(sess, name, input_ops, target_ops, len_ops, enqueue_ops, coord):
         idx = 0
+
         while not coord.should_stop():
           feed_dict = {
               input_ops[name]: self.data[name].x[idx],
               target_ops[name]: self.data[name].y[idx],
+              len_ops[name]: [self.data[name].seq_lengths[idx]],
           }
           sess.run(self.enqueue_ops[name], feed_dict=feed_dict)
           idx = idx+1 if idx+1 <= len(self.data[name].x) - 1 else 0
 
 
-      args = (sess, name, self.input_ops, self.target_ops, self.enqueue_ops, self.coord)
+      args = (sess, name, self.input_ops, self.target_ops, self.len_ops, self.enqueue_ops, self.coord)
       t = threading.Thread(target=load_and_enqueue, args=args)
       t.start()
       self.threads.append(t)
@@ -171,17 +161,22 @@ class TSPDataLoader(object):
     else:
       paths = [path]
 
-    x_list, y_list = read_paper_dataset(paths, self.max_length)
+    x_list, y_list = read_dataset(paths, self.max_length, self.min_length, 
+      self.input_dim)
 
-    x = np.zeros([len(x_list), self.max_length, 3], dtype=np.float32)
-    y = np.zeros([len(y_list), 7], dtype=np.int32)
+    x = np.zeros([len(x_list), self.max_length, self.input_dim], dtype=np.float32)
+    y = np.zeros([len(y_list), self.output_dim], dtype=np.int32)
+    seq_lengths = np.zeros(len(x_list),dtype=np.int32)
 
     for idx, (nodes, res) in enumerate(tqdm(zip(x_list, y_list))):
       x[idx,:min(self.max_length,len(nodes))] = nodes[:min(self.max_length,len(nodes))]
       y[idx,:len(res)] = res
+      seq_lengths[idx] = min(self.max_length,len(nodes))
+
+      
 
     if self.data is None:
       self.data = {}
 
     tf.logging.info("Update [{}] data with {} used in the paper".format(name, path))
-    self.data[name] = TSP(x=x, y=y, name=name)
+    self.data[name] = S2L(x=x, y=y, seq_lengths=seq_lengths, name=name)

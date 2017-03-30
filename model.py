@@ -6,7 +6,7 @@ from layers import *
 
 class Model(object):
   def __init__(self, config, 
-               inputs, labels, enc_seq_length, dec_seq_length, mask,
+               inputs, labels, enc_seq_length, dec_seq_length,
                reuse=False, is_critic=False):
     self.task = config.task
     self.debug = config.debug
@@ -17,16 +17,15 @@ class Model(object):
     self.num_layers = config.num_layers
 
     #MS added
-    self.num_classes = 7
+    self.num_classes = config.output_dim
 
-    self.max_enc_length = config.max_enc_length
+    # self.max_enc_length = config.max_enc_length
 
     self.init_min_val = config.init_min_val
     self.init_max_val = config.init_max_val
     self.initializer = \
         tf.random_uniform_initializer(self.init_min_val, self.init_max_val)
 
-    self.use_terminal_symbol = config.use_terminal_symbol
 
     self.lr_start = config.lr_start
     self.lr_decay_step = config.lr_decay_step
@@ -44,25 +43,21 @@ class Model(object):
         shape=(), name='is_training'
     )
 
-    self.enc_inputs, self.dec_targets, self.enc_seq_length, self.dec_seq_length, self.mask = \
+    self.enc_inputs, self.dec_targets, self.enc_seq_length, self.dec_seq_length = \
         utils.smart_cond(
             self.is_training,
             lambda: (inputs['train'], labels['train'], enc_seq_length['train'],
-                     dec_seq_length['train'], mask['train']),
+                     dec_seq_length['train']),
             lambda: (inputs['test'], labels['test'], enc_seq_length['test'],
-                     dec_seq_length['test'], mask['test'])
+                     dec_seq_length['test'])
         )
-    print self.enc_inputs.shape #(128, 135, 3)
-    print 'DEC TARGETS', self.dec_targets # shape=(128, 4) ((one batch))
 
-    if self.use_terminal_symbol:
-      self.dec_seq_length += 1 # terminal symbol
-
+    self.enc_seq_length = tf.reshape(self.enc_seq_length,[-1])
+    
     self._build_model()
     self._build_steps()
 
-    # if not reuse:
-    #   self._build_optim()
+  
 
     self.train_summary = tf.summary.merge([
         tf.summary.scalar("train/total_loss", self.total_loss),
@@ -122,9 +117,7 @@ class Model(object):
       self.enc_outputs, self.enc_final_states = tf.nn.dynamic_rnn(
           self.enc_cell, self.embeded_enc_inputs,
           self.enc_seq_length, self.enc_init_state)
-      print 'enc_out', self.enc_outputs
 
-    print 'enc_final_states', self.enc_final_states
     with tf.variable_scope("output_projection"):
       W = tf.get_variable(
           "W",
@@ -140,10 +133,14 @@ class Model(object):
       self.predictions = tf.argmax(self.scores, 1)
 
     with tf.variable_scope("loss"):
-      # self.class_weight = tf.constant([1, (1-.83)/1, (1-.03)/1, (1-.15)/1])
-      # self.weighted_logits = tf.multiply(self.scores, self.class_weight)
-      self.losses = tf.nn.softmax_cross_entropy_with_logits(
-          logits=self.scores, labels=self.dec_targets, name="ce_losses")
+      #TODO, should not be hard coded:
+      self.class_weight = tf.constant([1, 1-.021, 1-.059, 1-.156, 1-.01, 1.0, 1-.754])
+      self.weighted_logits = tf.multiply(self.scores, self.class_weight)
+      self.losses = tf.nn.weighted_cross_entropy_with_logits(tf.cast(self.dec_targets, tf.float32), 
+          self.weighted_logits, self.class_weight, name=None)
+
+      # self.losses = tf.nn.softmax_cross_entropy_with_logits(
+      #     logits=self.scores, labels=self.dec_targets, name="ce_losses")
       self.total_loss = tf.reduce_sum(self.losses)
       self.mean_loss = tf.reduce_mean(self.losses)
 

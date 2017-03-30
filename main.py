@@ -11,13 +11,13 @@ config = None
 def main(_):
   prepare_dirs_and_logger(config)
 
-  if not config.task.lower().startswith('tsp'):
-    raise Exception("[!] Task should starts with TSP")
+  if not config.task.lower().startswith('s2l'):
+    raise Exception("[!] Task should starts with s2l")
 
-  if config.max_enc_length is None:
-    config.max_enc_length = config.max_data_length
-  if config.max_dec_length is None:
-    config.max_dec_length = config.max_data_length
+  # if config.max_enc_length is None:
+  #   config.max_enc_length = config.max_data_length
+  # if config.max_dec_length is None:
+  #   config.max_dec_length = config.max_data_length
 
   rng = np.random.RandomState(config.random_seed)
   tf.set_random_seed(config.random_seed)
