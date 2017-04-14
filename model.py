@@ -6,7 +6,7 @@ from layers import *
 
 class Model(object):
   def __init__(self, config, 
-               inputs, labels, enc_seq_length, dec_seq_length,
+               inputs=None, labels=None, enc_seq_length=None, dec_seq_length=None,
                reuse=False, is_critic=False):
     self.task = config.task
     self.debug = config.debug
@@ -43,16 +43,25 @@ class Model(object):
         shape=(), name='is_training'
     )
 
-    self.enc_inputs, self.dec_targets, self.enc_seq_length, self.dec_seq_length = \
-        utils.smart_cond(
-            self.is_training,
-            lambda: (inputs['train'], labels['train'], enc_seq_length['train'],
-                     dec_seq_length['train']),
-            lambda: (inputs['test'], labels['test'], enc_seq_length['test'],
-                     dec_seq_length['test'])
-        )
+    if inputs != None:
+      self.enc_inputs, self.dec_targets, self.enc_seq_length, self.dec_seq_length = \
+          utils.smart_cond(
+              self.is_training,
+              lambda: (inputs['train'], labels['train'], enc_seq_length['train'],
+                       dec_seq_length['train']),
+              lambda: (inputs['test'], labels['test'], enc_seq_length['test'],
+                       dec_seq_length['test'])
+          )
 
-    self.enc_seq_length = tf.reshape(self.enc_seq_length,[-1])
+      self.enc_seq_length = tf.reshape(self.enc_seq_length,[-1])
+
+    else:
+      self.enc_inputs = tf.placeholder(tf.float32, shape=[128, 135, 3],
+                                       name='input') #<-batch size, 135? max seq length
+      self.enc_seq_length = tf.placeholder(tf.int32, shape=[128], name='seq_len')
+      self.dec_seq_length = tf.placeholder(tf.int32, shape=[128], name='dec_len')
+      self.dec_targets = tf.placeholder(tf.int32, shape=[128,7], name='dec_targets')
+    
     
     self._build_model()
     self._build_steps()
@@ -74,7 +83,7 @@ class Model(object):
       if summary is not None:
         fetch['summary'] = summary
 
-      result = sess.run(fetch)
+      result = sess.run(fetch, feed_dict)
       if summary_writer is not None:
         summary_writer.add_summary(result['summary'], result['step'])
         summary_writer.flush()
@@ -88,8 +97,13 @@ class Model(object):
       return run(sess, fetch, feed_dict={self.is_training: False},
                  summary_writer=summary_writer, summary=self.test_summary)
 
+    def predict(sess, fetch, feed_dict, summary_writer = None):
+      return run(sess, fetch, feed_dict=feed_dict,
+                 summary_writer=summary_writer, summary=self.test_summary)
+
     self.train = train
     self.test = test
+    self.predict = predict
 
   def _build_model(self):
     tf.logging.info("Create a model..")
