@@ -60,7 +60,6 @@ class Tester(object):
 
     self.sess = sv.prepare_or_wait_for_session(config=sess_config)
 
-
   def predict(self, data):
     tf.logging.info("Predicting...")
 
@@ -128,6 +127,7 @@ class Tester(object):
       result = self.model.predict(self.sess, fetch, 
                                   feed_dict=input_feed, 
                                   summary_writer=summary_writer)
+      print result['logits'][0:n_samples]
       predictions = np.append(predictions, np.argmax(result['logits'],1)).astype(int)
     
     return(predictions[0:n_samples])
