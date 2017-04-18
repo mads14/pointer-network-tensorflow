@@ -44,10 +44,12 @@ def genLSTMin(trips):
         for trip_id in trips[date]:
             trip = trips[date][trip_id]
 
-            print trip['great_circle_dist'], trip['origin_latlon'], trip['dest_latlon'], trip['origin_taz'], trip['dest_taz'], trip['duration']
-            raw_sequence = trip['raw_sequence']
-            lstm_one_trip = rawSeqToLSTM(raw_sequence)
-            lstm_user_trips.append(lstm_one_trip)
+            if (trip['great_circle_dist']>5.0) & (trip['origin_taz']!=None) & (trip['dest_taz']!=None):
+              raw_sequence = trip['raw_sequence']
+              if len(raw_sequence)>10: 
+                print trip['great_circle_dist'], trip['origin_latlon'], trip['dest_latlon'], trip['origin_taz'], trip['dest_taz'], trip['duration']
+                lstm_one_trip = rawSeqToLSTM(raw_sequence)
+                lstm_user_trips.append(lstm_one_trip)
 
     return lstm_user_trips
 
