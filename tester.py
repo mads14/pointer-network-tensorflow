@@ -128,6 +128,7 @@ class Tester(object):
       result = self.model.predict(self.sess, fetch, 
                                   feed_dict=input_feed, 
                                   summary_writer=summary_writer)
+      print result['logits']
       predictions = np.append(predictions, np.argmax(result['logits'],1)).astype(int)
     
     return(predictions[0:n_samples])
