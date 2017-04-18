@@ -7,14 +7,14 @@ from tensorflow.contrib.framework.python.ops import arg_scope
 
 from model import Model
 from utils import show_all_variables
-# from data_loader import S2LDataLoader
 from sklearn.metrics import confusion_matrix, accuracy_score, classification_report
-import matplotlib.pyplot as plt
 
 class Tester(object):
   def __init__(self, config):
     np.set_printoptions(formatter={'float':lambda x: '%.3f'%x})
     self.config = config
+    print self.config
+    print type(self.config)
 
     self.task = config.task
     self.model_dir = config.model_dir
@@ -24,15 +24,6 @@ class Tester(object):
     self.max_step = config.max_step
     self.num_log_samples = config.num_log_samples
     self.checkpoint_secs = config.checkpoint_secs
-
-    # # MS added
-    # self.print_logits = True
-
-    # if config.task.lower().startswith('s2l'):
-    #   #UPDATE for spark
-    #   self.data_loader = S2LDataLoader(config, rng=self.rng)
-    # else:
-    #   raise Exception("[!] Unknown task: {}".format(config.task))
 
     self.model = Model(config)
 
@@ -60,13 +51,15 @@ class Tester(object):
 
     self.sess = sv.prepare_or_wait_for_session(config=sess_config)
 
-
-  def predict(self, data):
+  def predict(self, data, return_probs = False):
     tf.logging.info("Predicting...")
 
-    
-    _predictions= self._predict(None, data)
-    return _predictions
+    if return_probs:
+        _predictions, _probs = self._predict(None, data, True)
+        return _predictions, _probs
+    else:
+        _predictions= self._predict(None, data)
+        return _predictions
 
   def calc_accuracy(self, predictions, labels):
     correct = predictions == labels
@@ -88,7 +81,7 @@ class Tester(object):
 
     return accuracy
 
-  def _predict(self, summary_writer, data):
+  def _predict(self, summary_writer, data, return_probs=False):
     fetch = {'logits': self.model.y}
 
     # format data
@@ -96,9 +89,9 @@ class Tester(object):
     n_samples = len(data)
 
     data = list(data)
-    data.extend(np.zeros((128-len(data)%128,1,3)))
+    data.extend(np.zeros((self.config.batch_size-len(data)%self.config.batch_size,1,self.config.input_dim)))
     #TODO this should come from config (as well as batch size and shape above)
-    max_seq_length = 135
+    max_seq_length = self.config.max_data_length
     # if more than 128 samples break into multiple batches:
     seq_lengths = []
     for i in range(len(data)):
@@ -114,14 +107,14 @@ class Tester(object):
     seq_lengths = np.array(seq_lengths)
 
     predictions = np.array([])
-    for i in range(int(len(data)/128)):
-      data_batch = data[i*128:(i+1)*128]
-      batch_seq_lengths = seq_lengths[i*128:(i+1)*128]
+    for i in range(int(len(data)/self.config.batch_size)):
+      data_batch = data[i*self.config.batch_size:(i+1)*self.config.batch_size]
+      batch_seq_lengths = seq_lengths[i*self.config.batch_size:(i+1)*self.config.batch_size]
 
       input_feed = {self.model.enc_inputs.name: data_batch,
                     self.model.enc_seq_length.name: batch_seq_lengths,
-                    self.model.dec_seq_length.name: np.ones(128)*7,
-                    self.model.dec_targets.name: np.zeros((128,7)),
+                    self.model.dec_seq_length.name: np.ones(self.config.batch_size)*self.config.output_dim,
+                    self.model.dec_targets.name: np.zeros((self.config.batch_size,self.config.output_dim)),
                     self.model.is_training.name: False
       }
 
@@ -131,22 +124,10 @@ class Tester(object):
       print result['logits']
       predictions = np.append(predictions, np.argmax(result['logits'],1)).astype(int)
     
-    return(predictions[0:n_samples])
-
-    # if plot:
-    #             #car,  walk, train,   bus,    subwas,  tram,   cable car
-    #   colors = ['blue','red','green','black','orange','purple','grey']
-    #   for i in range(len(predictions)):
-    #     x = result["inputs"][i][0:result["input_len"][i]]
-    #     # color = colors[6-predictions[i]]
-    #     if labels[i] != predictions[i]:
-    #       plt.plot(x[:,1], x[:,0], color=colors[6-predictions[i]], linewidth=2.0)
-    #       plt.plot(x[:,1], x[:,0], 'o', color=colors[6-labels[i]])
-    #     else:
-    #       plt.plot(x[:,1], x[:,0], color=colors[6-predictions[i]])
-    #     # print x, labels[i], color, predictions[i]
-    #   plt.show()
-    # return predictions, labels
+    if return_probs:
+      return predictions[0:n_samples], result['logits'][0:n_samples]
+    return predictions[0:n_samples] 
+    
 
   def _get_summary_writer(self, result):
     if result['step'] % self.log_step == 0:
