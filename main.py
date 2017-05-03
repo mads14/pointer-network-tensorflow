@@ -6,6 +6,8 @@ from trainer import Trainer
 from config import get_config
 from utils import prepare_dirs_and_logger, save_config
 
+from  tester import Tester
+
 config = None
 
 def main(_):
@@ -15,7 +17,7 @@ def main(_):
     raise Exception("[!] Task should starts with s2l")
 
   # if config.max_enc_length is None:
-  #   config.max_enc_length = config.max_data_length
+  config.max_enc_length = config.max_data_length
   # if config.max_dec_length is None:
   #   config.max_dec_length = config.max_data_length
 
@@ -23,7 +25,17 @@ def main(_):
   tf.set_random_seed(config.random_seed)
 
   trainer = Trainer(config, rng)
-  save_config(config.model_dir, config)
+  # tester = Tester(config)
+  # save_config(config.model_dir, config)
+
+  # data = [np.array([[ 0.5144 ,  0.4892 ,  0.     ],
+  #                   [ 0.5088 ,  0.4916 ,  0.0034 ],
+  #                   [ 0.514  ,  0.5036 ,  0.00572],
+  #                   [ 0.514  ,  0.5036 ,  0.00576],
+  #                   [ 0.514  ,  0.5036 ,  0.00588],
+  #                   [ 0.5096 ,  0.5076 ,  0.01336]])]
+  # print tester.predict(data)
+
 
   if config.is_train:
     trainer.train()
