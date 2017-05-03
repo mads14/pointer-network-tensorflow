@@ -13,8 +13,6 @@ class Tester(object):
   def __init__(self, config):
     np.set_printoptions(formatter={'float':lambda x: '%.3f'%x})
     self.config = config
-    print self.config
-    print type(self.config)
 
     self.task = config.task
     self.model_dir = config.model_dir
