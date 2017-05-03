@@ -66,8 +66,8 @@ class S2LDataLoader(object):
     self.queue_ops, self.enqueue_ops = None, None
     self.x, self.y, self.seq_length, self.mask = None, None, None, None
 
-    paths = {'train':'data/train_trips_normed.csv', 
-             'test':'data/test_trips_normed.csv'}
+    paths = {'train':'data/train_trips_normed_1p0kmnoise_withspeeds.csv', 
+             'test':'data/test_trips_normed_1p0kmnoise_withspeeds.csv'}
 
     if len(paths) != 0:
       #todo change from gen_and_save to check_paths_exist

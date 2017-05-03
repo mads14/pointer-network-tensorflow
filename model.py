@@ -19,7 +19,7 @@ class Model(object):
     #MS added
     self.num_classes = config.output_dim
 
-    # self.max_enc_length = config.max_enc_length
+    self.max_enc_length = config.max_enc_length
 
     self.init_min_val = config.init_min_val
     self.init_max_val = config.init_max_val
@@ -56,11 +56,11 @@ class Model(object):
       self.enc_seq_length = tf.reshape(self.enc_seq_length,[-1])
 
     else:
-      self.enc_inputs = tf.placeholder(tf.float32, shape=[128, 135, 3],
+      self.enc_inputs = tf.placeholder(tf.float32, shape=[self.batch_size, self.max_enc_length, self.input_dim],
                                        name='input') #<-batch size, 135? max seq length
-      self.enc_seq_length = tf.placeholder(tf.int32, shape=[128], name='seq_len')
-      self.dec_seq_length = tf.placeholder(tf.int32, shape=[128], name='dec_len')
-      self.dec_targets = tf.placeholder(tf.int32, shape=[128,7], name='dec_targets')
+      self.enc_seq_length = tf.placeholder(tf.int32, shape=[self.batch_size], name='seq_len')
+      self.dec_seq_length = tf.placeholder(tf.int32, shape=[self.batch_size], name='dec_len')
+      self.dec_targets = tf.placeholder(tf.int32, shape=[self.batch_size,self.num_classes], name='dec_targets')
     
     
     self._build_model()
