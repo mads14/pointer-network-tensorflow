@@ -134,6 +134,7 @@ class S2LDataLoader(object):
 
       args = (sess, name, self.input_ops, self.target_ops, self.len_ops, self.enqueue_ops, self.coord)
       t = threading.Thread(target=load_and_enqueue, args=args)
+      t.daemon=True
       t.start()
       self.threads.append(t)
       tf.logging.info("Thread for [{}] start".format(name))

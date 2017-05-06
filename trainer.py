@@ -46,7 +46,10 @@ class Trainer(object):
 
   def build_session(self):
     self.saver = tf.train.Saver()
+    print self.model_dir
     self.summary_writer = tf.summary.FileWriter(self.model_dir)
+    self.train_writer = tf.summary.FileWriter(self.model_dir+'/train')
+    self.test_writer = tf.summary.FileWriter(self.model_dir+'/test')
 
     sv = tf.train.Supervisor(logdir=self.model_dir,
                              is_chief=True,
@@ -78,7 +81,8 @@ class Trainer(object):
       result = self.model.train(self.sess, fetch, summary_writer)
 
       if result['step'] % self.log_step == 0:
-        self._test(self.summary_writer)
+        self._test(self.test_writer)
+          # self.summary_writer)
 
       summary_writer = self._get_summary_writer(result)
 
@@ -180,6 +184,7 @@ class Trainer(object):
 
   def _get_summary_writer(self, result):
     if result['step'] % self.log_step == 0:
-      return self.summary_writer
+      return self.train_writer
+      #self.summary_writer
     else:
       return None

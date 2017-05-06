@@ -1,6 +1,8 @@
+from __future__ import division
 import tensorflow as tf
 from tensorflow.contrib.framework import arg_scope
 from tensorflow.contrib.layers.python.layers import utils
+import numpy as np
 
 from layers import *
 
@@ -66,16 +68,42 @@ class Model(object):
     self._build_model()
     self._build_steps()
 
-  
+    summaries = []
+    for i in range(self.num_classes):
+      ind = tf.constant([i]*128,np.int64)
+      class_correct = tf.count_nonzero(
+          tf.logical_and(self.correct_predictions,
+              tf.equal(tf.argmax(self.dec_targets, 1),ind))
+          )
+      class_predict_count = tf.count_nonzero(tf.equal(self.predictions, ind))
+      class_labels_count = tf.count_nonzero(tf.equal(tf.argmax(self.dec_targets, 1), ind))
+      # if class_predict_count:
+      precision = tf.cond(class_predict_count>0, 
+                          lambda: class_correct/class_predict_count, 
+                          lambda: tf.constant(0,np.float64))
+      summaries.append(tf.summary.scalar("precision_{}".format(i), precision))
+      # if class_labels_count:
+      recall = tf.cond(class_labels_count>0, 
+                       lambda: class_correct/class_labels_count, 
+                       lambda: tf.constant(0,np.float64))
+      summaries.append(tf.summary.scalar("recall_{}".format(i), recall))
+    summaries.append(tf.summary.scalar("total_loss", self.total_loss))
+    summaries.append(tf.summary.scalar("lr", self.lr))
+    summaries.append(tf.summary.scalar("accuracy", self.accuracy))
+
+
+    self.summary = tf.summary.merge(
+      summaries
+      )
 
     self.train_summary = tf.summary.merge([
-        tf.summary.scalar("train/total_loss", self.total_loss),
-        tf.summary.scalar("train/lr", self.lr),
+        tf.summary.scalar("total_loss", self.total_loss),
+        tf.summary.scalar("lr", self.lr),
     ])
 
-    self.test_summary = tf.summary.merge([
-        tf.summary.scalar("test/total_loss", self.total_loss),
-    ])
+    # self.test_summary = tf.summary.merge([
+    #     tf.summary.scalar("total_loss", self.total_loss),
+    # ])
 
   def _build_steps(self):
     def run(sess, fetch, feed_dict, summary_writer, summary):
@@ -87,19 +115,20 @@ class Model(object):
       if summary_writer is not None:
         summary_writer.add_summary(result['summary'], result['step'])
         summary_writer.flush()
+
       return result
 
     def train(sess, fetch, summary_writer):
       return run(sess, fetch, feed_dict={},
-                 summary_writer=summary_writer, summary=self.train_summary)
+                 summary_writer=summary_writer, summary=self.summary)
 
     def test(sess, fetch, summary_writer=None):
       return run(sess, fetch, feed_dict={self.is_training: False},
-                 summary_writer=summary_writer, summary=self.test_summary)
+                 summary_writer=summary_writer, summary=self.summary)
 
     def predict(sess, fetch, feed_dict, summary_writer = None):
       return run(sess, fetch, feed_dict=feed_dict,
-                 summary_writer=summary_writer, summary=self.test_summary)
+                 summary_writer=summary_writer, summary=None)
 
     self.train = train
     self.test = test
@@ -176,8 +205,5 @@ class Model(object):
     with tf.name_scope("grad_norms") as scope:
       grad_summ = tf.summary.scalar("grad_norms", norm)
     self.optim = opt.apply_gradients(zip(clipped_gradients, params), global_step=self.global_step)
-    loss_summ = tf.summary.scalar("{0}_loss".format("train"), self.mean_loss)
-    acc_summ = tf.summary.scalar("{0}_accuracy".format("train"), self.accuracy)
-    self.merged = tf.summary.merge([loss_summ, acc_summ])
-    self.saver = tf.train.Saver(tf.global_variables())
+    
 
