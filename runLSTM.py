@@ -55,15 +55,18 @@ def genLSTMin(trips):
     return lstm_user_trips, trip_ids
 
 def main(_):
+    np.set_printoptions(precision = 2, suppress=True)
     prepare_dirs_and_logger(config)
     tester = Tester(config)
     # after getting trips of interest use tester.predict(data)
 
     directory = '/home/mogeng/attResearch/sample/CLF/MultipleCities/SF/single_month/20150601-20150628/trip_data/commuter/all/'
-    for file in os.listdir(directory):
+    for file in os.listdir(directory)[1::]:
         if file.endswith(".json"):
             filename = os.path.join(directory, file)
+            print filename
             with open(filename) as data_file:    
+                print data_file
                 data = json.load(data_file)
 
             trips = data['trips']
@@ -73,8 +76,9 @@ def main(_):
             
             for i in range(len(trip_ids)):
                 data['trips'][trip_ids[i][0]][trip_ids[i][1]]['travel_mode_label'] = labels[i]
-                data['trips'][trip_ids[i][0]][trip_ids[i][1]]['travel_mode_probs'] = probs[i]
+                data['trips'][trip_ids[i][0]][trip_ids[i][1]]['travel_mode_probs'] = list(probs[i].astype(float))
 
+            #print labels, probs
             with open(filename,'w') as fp:
                 json.dump(data,fp)
 
